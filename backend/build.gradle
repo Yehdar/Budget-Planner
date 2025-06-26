@@ -3,9 +3,6 @@ plugins {
     id 'application'
 }
 
-group = 'com.example'
-version = '1.0-SNAPSHOT'
-
 repositories {
     mavenCentral()
 }
@@ -27,4 +24,15 @@ dependencies {
 
 application {
     mainClass = 'com.example.ApplicationKt'
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
 }

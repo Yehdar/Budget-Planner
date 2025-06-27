@@ -6,10 +6,18 @@ import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.plugins.callloging.*
+import io.ktor.server.plugins.cors.routing.*
+import io.ktor.http.*
+
 
 fun main() {
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
-        install(CallLogging)
+        install(CORS) {
+            anyHost()
+            allowHeader(HttpHeaders.ContentType)
+            allowMethod(HttpMethod.Get)
+        }
+
         routing {
             get("/hello") {
                 call.respondText("Hello, Budget Planner!")

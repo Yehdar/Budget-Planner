@@ -1,7 +1,9 @@
 Running Code:
 
-```
+- Frontend
 
+```
+  npm run dev
 ```
 
 - Backend
@@ -31,7 +33,7 @@ Installation:
 ```
   mkdir backend
   cd backend
-  gradle init # ends up using Groovy DSL instead of Kotlin DSL.  As such, change the file extensions from build.gradle to build.gradle.kts and settings.gradle to settings.gradle.kts
+  gradle init # ends up using Groovy DSL instead of Kotlin DSL.  As such, update the file extensions from build.gradle to build.gradle.kts and settings.gradle to settings.gradle.kts
 ```
 
 - Database
@@ -61,5 +63,5 @@ Challenges:
 - Importance of a dedicated IDE
   Originally, I wanted to run everything through the terminal because I'm an old soul, but I realized it was taking too long to build. Accordingly, I switched to using IntelliJ IDEA for the backend. Great Choice!
 
-- Node Version Outaded
+- Node Version Outdated
   Got a whole bunch of errors about crypto.hash is not a function because I need Node 20 (not 18 even thought it works fine)

@@ -1,16 +1,18 @@
 import { useState, useEffect } from "react";
 
-// Define the structure of a budget category item as received from the backend
+// Define the structure of a single transaction entry
 interface TransactionEntry {
   amount: number;
   description: string;
 }
 
+// Updated: Define the structure of a budget category item as received from the backend
 interface BudgetCategoryItem {
   category: string;
   originalValue: number;
   spentAmountSoFar: number;
-  transactionHistory: { [date: string]: TransactionEntry };
+  // Changed: transactionHistory now maps a date string to a LIST of TransactionEntry
+  transactionHistory: { [date: string]: TransactionEntry[] };
 }
 
 function App() {
@@ -38,7 +40,6 @@ function App() {
   const fetchBudgetItems = async () => {
     setErrorMessage(null);
     try {
-      // Call the new endpoint
       const response = await fetch(`${API_BASE_URL}/budget/getAllCategories`);
       if (response.ok) {
         const data: BudgetCategoryItem[] = await response.json();
@@ -355,17 +356,27 @@ function App() {
                     </p>
                   ) : (
                     <ul className="divide-y divide-gray-600">
+                      {/* Iterate over dates, then over transactions for each date */}
                       {Object.entries(
                         selectedCategoryDetails.transactionHistory
                       )
-                        .sort(([dateA], [dateB]) => dateB.localeCompare(dateA)) // Sort by date, newest first
-                        .map(([date, transaction], index) => (
-                          <li key={date + index} className="py-2 text-gray-300">
-                            <span className="font-bold text-gray-200">
+                        .sort(([dateA], [dateB]) => dateB.localeCompare(dateA)) // Sort dates, newest first
+                        .map(([date, transactionsForDate]) => (
+                          <li key={date} className="py-2">
+                            <p className="font-bold text-gray-200 mb-1">
                               {date}:
-                            </span>{" "}
-                            ${transaction.amount.toFixed(2)} -{" "}
-                            {transaction.description}
+                            </p>
+                            <ul className="list-disc list-inside ml-4">
+                              {transactionsForDate.map((transaction, index) => (
+                                <li
+                                  key={`${date}-${index}`}
+                                  className="text-gray-300"
+                                >
+                                  ${transaction.amount.toFixed(2)} -{" "}
+                                  {transaction.description}
+                                </li>
+                              ))}
+                            </ul>
                           </li>
                         ))}
                     </ul>

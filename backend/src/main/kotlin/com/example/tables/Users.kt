@@ -1,13 +1,12 @@
 package com.example.tables
 
-import org.jetbrains.exposed.sql.Table
-import java.math.BigDecimal
+import org.jetbrains.exposed.dao.id.IntIdTable
 
-object Users : Table("users") {
-    val id = integer("id").autoIncrement()
+/**
+ * Defines the Users table in the database.
+ * Inherits from IntIdTable to automatically get an auto-incrementing integer 'id' primary key.
+ */
+object Users : IntIdTable("users") {
     val username = varchar("username", 50).uniqueIndex()
-    val password = varchar("password", 64) // in real life: hash!
-    val balance = decimal("balance", 10, 2)
-
-    override val primaryKey = PrimaryKey(id)
+    val password = varchar("password", 64)
 }

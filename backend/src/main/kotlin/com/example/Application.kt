@@ -14,19 +14,47 @@ import io.ktor.server.request.receive
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString // For decoding JSON string back to Map
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
-import kotlinx.serialization.builtins.serializer // Import for String.serializer()
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.time.LocalDate // Import for LocalDate
 
-// Data class for saving a single budget item
+// Data class for adding a new budget category
 @Serializable
-data class BudgetSaveRequest(
+data class AddBudgetCategoryRequest(
     val categoryName: String,
-    val initialValue: String // Keeping as String to match frontend input flexibility
+    val originalValue: Double
+)
+
+// Data class for recording a spending transaction
+@Serializable
+data class RecordSpendRequest(
+    val categoryName: String,
+    val amountSpent: Double,
+    val description: String
+)
+
+// Data class for a single transaction entry in the history
+@Serializable
+data class TransactionEntry(
+    val amount: Double,
+    val description: String
+)
+
+// Data class to represent a budget category item for response
+@Serializable
+data class BudgetCategoryItem(
+    val category: String,
+    val originalValue: Double,
+    val spentAmountSoFar: Double,
+    val transactionHistory: Map<String, TransactionEntry> // Map date string to TransactionEntry
 )
 
 fun main() {
@@ -58,78 +86,184 @@ fun main() {
                 Users.insert {
                     it[id] = 1 // Explicitly set ID to 1 for the default user
                     it[username] = "default_user"
-                    it[password] = "default_password" // Still hash in real app!
+                    it[password] = "default_password"
                 }
             }
         }
 
         routing {
-            // Endpoint to save or update budget items for the default user
-            post("/budget/save") {
+            // Endpoint to add a new budget category or update its original value
+            post("/budget/addCategory") {
                 try {
-                    val request = call.receive<BudgetSaveRequest>()
+                    val request = call.receive<AddBudgetCategoryRequest>()
                     val categoryName = request.categoryName
-                    val initialValue = request.initialValue
+                    val originalValue = request.originalValue
+                    val defaultUserId = 1 // Assuming default user
 
-                    transaction {
-                        val defaultUserId = 1 // Using the ID of the default user
+                    val result = transaction {
+                        val existingCategory = Budgets.select {
+                            (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName)
+                        }.singleOrNull()
 
-                        // Try to find an existing budget for the default user
-                        val existingBudget = Budgets.select { Budgets.id eq defaultUserId }.singleOrNull()
-
-                        val currentBudgetValues: MutableMap<String, JsonElement> =
-                            if (existingBudget != null) {
-                                // Decode existing JSON string into a mutable map
-                                Json.decodeFromString<MutableMap<String, JsonElement>>(existingBudget[Budgets.values])
-                            } else {
-                                mutableMapOf() // Start with an empty map if no budget exists
+                        if (existingCategory != null) {
+                            // Update existing category's original value
+                            Budgets.update({ (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName) }) {
+                                it[Budgets.originalValue] = originalValue
                             }
-
-                        // Add or update the new category and its value
-                        // Convert the initialValue String to a JsonPrimitive (String)
-                        // Use String.serializer() to explicitly tell Json.encodeToJsonElement how to serialize a String
-                        currentBudgetValues[categoryName] = Json.encodeToJsonElement(String.serializer(), initialValue)
-
-                        // Encode the updated map back to a JSON string
-                        val updatedValuesJsonString = Json.encodeToString(currentBudgetValues)
-
-                        if (existingBudget != null) {
-                            // Update the existing budget entry
-                            Budgets.update({ Budgets.id eq defaultUserId }) {
-                                it[values] = updatedValuesJsonString
-                            }
+                            "updated" // Return a string to indicate update
                         } else {
-                            // Insert a new budget entry for the default user
+                            // Add new category
                             Budgets.insert {
-                                it[id] = defaultUserId
-                                it[values] = updatedValuesJsonString
+                                it[Budgets.userId] = defaultUserId
+                                it[Budgets.category] = categoryName
+                                it[Budgets.originalValue] = originalValue
+                                it[Budgets.spentAmountSoFar] = 0.0 // New category starts with 0 spent
+                                it[Budgets.transactionHistory] = "{}" // New category starts with empty history
                             }
+                            "created" // Return a string to indicate creation
                         }
                     }
-                    call.respond(HttpStatusCode.OK, "Budget item saved successfully.")
+
+                    when (result) {
+                        "updated" -> call.respond(HttpStatusCode.OK, "Budget category '$categoryName' updated successfully.")
+                        "created" -> call.respond(HttpStatusCode.Created, "Budget category '$categoryName' added successfully.")
+                        else -> call.respond(HttpStatusCode.InternalServerError, "Unexpected error during category operation.")
+                    }
+
                 } catch (e: Exception) {
-                    call.respond(HttpStatusCode.BadRequest, "Failed to save budget item: ${e.localizedMessage}")
+                    call.respond(HttpStatusCode.BadRequest, "Failed to add/update budget category: ${e.localizedMessage}")
                 }
             }
 
-            // Endpoint to get all budget items for the default user
-            get("/budget/get") {
+            // Endpoint to record spending for a category
+            post("/budget/recordSpend") {
                 try {
-                    val defaultUserId = 1 // Using the ID of the default user
+                    val request = call.receive<RecordSpendRequest>()
+                    val categoryName = request.categoryName
+                    val amountSpent = request.amountSpent
+                    val description = request.description
+                    val defaultUserId = 1 // Assuming default user
 
-                    val budget = transaction {
-                        Budgets.select { Budgets.id eq defaultUserId }.singleOrNull()
+                    // Perform database operations in transaction and return a result
+                    val transactionResult: String = transaction {
+                        val existingCategory = Budgets.select {
+                            (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName)
+                        }.singleOrNull()
+
+                        if (existingCategory == null) {
+                            return@transaction "notFound" // Indicate category not found
+                        }
+
+                        val currentSpent = existingCategory[Budgets.spentAmountSoFar]
+                        val newSpent = currentSpent + amountSpent
+
+                        // Decode existing transaction history
+                        val currentHistoryJsonString = existingCategory[Budgets.transactionHistory]
+                        val currentHistory: MutableMap<String, TransactionEntry> =
+                            if (currentHistoryJsonString.isNotEmpty() && currentHistoryJsonString != "{}") {
+                                Json.decodeFromString(currentHistoryJsonString)
+                            } else {
+                                mutableMapOf()
+                            }
+
+                        // Get current date for transaction history key
+                        val currentDate = LocalDate.now().toString() // YYYY-MM-DD
+
+                        // Add new transaction entry
+                        currentHistory[currentDate] = TransactionEntry(amountSpent, description)
+
+                        // Encode updated history back to JSON string
+                        val updatedHistoryJsonString = Json.encodeToString(currentHistory)
+
+                        // Update the budget category record
+                        Budgets.update({ (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName) }) {
+                            it[Budgets.spentAmountSoFar] = newSpent
+                            it[Budgets.transactionHistory] = updatedHistoryJsonString
+                        }
+                        "success:$newSpent" // Indicate success and new spent amount
                     }
 
-                    if (budget != null) {
-                        // Respond with the raw JSON string of budget values
-                        call.respondText(budget[Budgets.values], contentType = ContentType.Application.Json)
-                    } else {
-                        // Respond with an empty JSON object if no budget found for the user
-                        call.respondText("{}", contentType = ContentType.Application.Json)
+                    // Handle the result of the transaction outside the transaction block
+                    when {
+                        transactionResult == "notFound" -> call.respond(HttpStatusCode.NotFound, "Budget category '$categoryName' not found for user.")
+                        transactionResult.startsWith("success:") -> {
+                            val newSpent = transactionResult.split(":")[1]
+                            call.respond(HttpStatusCode.OK, "Spend recorded for '$categoryName'. New spent total: $newSpent")
+                        }
+                        else -> call.respond(HttpStatusCode.InternalServerError, "An unexpected error occurred.")
                     }
+
                 } catch (e: Exception) {
-                    call.respond(HttpStatusCode.InternalServerError, "Failed to retrieve budget: ${e.localizedMessage}")
+                    call.respond(HttpStatusCode.BadRequest, "Failed to record spending: ${e.localizedMessage}")
+                }
+            }
+
+            // Endpoint to get all budget categories for the default user
+            get("/budget/getAllCategories") {
+                try {
+                    val defaultUserId = 1 // Assuming default user
+
+                    val categories = transaction {
+                        Budgets.select { Budgets.userId eq defaultUserId }
+                            .map { row ->
+                                val historyJsonString = row[Budgets.transactionHistory]
+                                val historyMap: Map<String, TransactionEntry> =
+                                    if (historyJsonString.isNotEmpty() && historyJsonString != "{}") {
+                                        Json.decodeFromString(historyJsonString)
+                                    } else {
+                                        emptyMap()
+                                    }
+
+                                BudgetCategoryItem(
+                                    category = row[Budgets.category],
+                                    originalValue = row[Budgets.originalValue],
+                                    spentAmountSoFar = row[Budgets.spentAmountSoFar],
+                                    transactionHistory = historyMap
+                                )
+                            }
+                    }
+                    call.respond(HttpStatusCode.OK, categories)
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, "Failed to retrieve budget categories: ${e.localizedMessage}")
+                }
+            }
+
+            // Endpoint to get details for a specific budget category (including its transaction history)
+            get("/budget/getCategoryDetails/{categoryName}") {
+                try {
+                    val categoryName = call.parameters["categoryName"] ?: throw IllegalArgumentException("Category name missing")
+                    val defaultUserId = 1 // Assuming default user
+
+                    val categoryDetails = transaction {
+                        Budgets.select {
+                            (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName)
+                        }.singleOrNull()?.let { row ->
+                            val historyJsonString = row[Budgets.transactionHistory]
+                            val historyMap: Map<String, TransactionEntry> =
+                                if (historyJsonString.isNotEmpty() && historyJsonString != "{}") {
+                                    Json.decodeFromString(historyJsonString)
+                                } else {
+                                    emptyMap()
+                                }
+
+                            BudgetCategoryItem(
+                                category = row[Budgets.category],
+                                originalValue = row[Budgets.originalValue],
+                                spentAmountSoFar = row[Budgets.spentAmountSoFar],
+                                transactionHistory = historyMap
+                            )
+                        }
+                    }
+
+                    if (categoryDetails != null) {
+                        call.respond(HttpStatusCode.OK, categoryDetails)
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "Category '$categoryName' not found for user.")
+                    }
+                } catch (e: IllegalArgumentException) {
+                    call.respond(HttpStatusCode.BadRequest, e.localizedMessage)
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, "Failed to retrieve category details: ${e.localizedMessage}")
                 }
             }
         }

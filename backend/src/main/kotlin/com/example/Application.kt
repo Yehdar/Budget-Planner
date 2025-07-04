@@ -25,6 +25,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.time.LocalDate // Import for LocalDate
+import kotlinx.serialization.builtins.ListSerializer // Import for ListSerializer
+import kotlinx.serialization.builtins.MapSerializer // Import for MapSerializer
 
 // Data class for adding a new budget category
 @Serializable
@@ -54,7 +56,8 @@ data class BudgetCategoryItem(
     val category: String,
     val originalValue: Double,
     val spentAmountSoFar: Double,
-    val transactionHistory: Map<String, TransactionEntry> // Map date string to TransactionEntry
+    // Changed transactionHistory to map date string to a LIST of TransactionEntry
+    val transactionHistory: Map<String, List<TransactionEntry>>
 )
 
 fun main() {
@@ -118,7 +121,7 @@ fun main() {
                                 it[Budgets.category] = categoryName
                                 it[Budgets.originalValue] = originalValue
                                 it[Budgets.spentAmountSoFar] = 0.0 // New category starts with 0 spent
-                                it[Budgets.transactionHistory] = "{}" // New category starts with empty history
+                                it[Budgets.transactionHistory] = "{}" // New category starts with empty JSON object for history
                             }
                             "created" // Return a string to indicate creation
                         }
@@ -157,9 +160,9 @@ fun main() {
                         val currentSpent = existingCategory[Budgets.spentAmountSoFar]
                         val newSpent = currentSpent + amountSpent
 
-                        // Decode existing transaction history
+                        // Decode existing transaction history into a map of date to LIST of transactions
                         val currentHistoryJsonString = existingCategory[Budgets.transactionHistory]
-                        val currentHistory: MutableMap<String, TransactionEntry> =
+                        val currentHistory: MutableMap<String, MutableList<TransactionEntry>> =
                             if (currentHistoryJsonString.isNotEmpty() && currentHistoryJsonString != "{}") {
                                 Json.decodeFromString(currentHistoryJsonString)
                             } else {
@@ -167,10 +170,12 @@ fun main() {
                             }
 
                         // Get current date for transaction history key
-                        val currentDate = LocalDate.now().toString() // YYYY-MM-DD
+                        val currentDate = LocalDate.now().toString() // Format: YYYY-MM-DD
 
-                        // Add new transaction entry
-                        currentHistory[currentDate] = TransactionEntry(amountSpent, description)
+                        // Get the list of transactions for the current date, or create a new list if none exists
+                        val transactionsForDate = currentHistory.getOrPut(currentDate) { mutableListOf() }
+                        // Add the new transaction to the list
+                        transactionsForDate.add(TransactionEntry(amountSpent, description))
 
                         // Encode updated history back to JSON string
                         val updatedHistoryJsonString = Json.encodeToString(currentHistory)
@@ -207,7 +212,8 @@ fun main() {
                         Budgets.select { Budgets.userId eq defaultUserId }
                             .map { row ->
                                 val historyJsonString = row[Budgets.transactionHistory]
-                                val historyMap: Map<String, TransactionEntry> =
+                                // Decode transaction history into a map of date to LIST of transactions
+                                val historyMap: Map<String, List<TransactionEntry>> =
                                     if (historyJsonString.isNotEmpty() && historyJsonString != "{}") {
                                         Json.decodeFromString(historyJsonString)
                                     } else {
@@ -239,7 +245,8 @@ fun main() {
                             (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName)
                         }.singleOrNull()?.let { row ->
                             val historyJsonString = row[Budgets.transactionHistory]
-                            val historyMap: Map<String, TransactionEntry> =
+                            // Decode transaction history into a map of date to LIST of transactions
+                            val historyMap: Map<String, List<TransactionEntry>> =
                                 if (historyJsonString.isNotEmpty() && historyJsonString != "{}") {
                                     Json.decodeFromString(historyJsonString)
                                 } else {

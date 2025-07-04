@@ -1,23 +1,55 @@
 import { useState, useEffect } from "react";
 
+// Define the structure of a budget category item as received from the backend
+interface TransactionEntry {
+  amount: number;
+  description: string;
+}
+
+interface BudgetCategoryItem {
+  category: string;
+  originalValue: number;
+  spentAmountSoFar: number;
+  transactionHistory: { [date: string]: TransactionEntry };
+}
+
 function App() {
-  const [categoryName, setCategoryName] = useState("");
-  const [initialValue, setInitialValue] = useState("");
-  const [budgetItems, setBudgetItems] = useState<{ [key: string]: string }>({}); // To store fetched budget items
+  // State for adding new categories
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newOriginalValue, setNewOriginalValue] = useState("");
+
+  // State for recording spending
+  const [spendCategory, setSpendCategory] = useState(""); // Selected category for spending
+  const [amountSpent, setAmountSpent] = useState("");
+  const [spendDescription, setSpendDescription] = useState("");
+
+  // State for fetched budget data
+  const [budgetItems, setBudgetItems] = useState<BudgetCategoryItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string>(""); // For the dropdown selection
+
+  // State for selected category in the overview dropdown
+  const [selectedCategoryDetails, setSelectedCategoryDetails] =
+    useState<BudgetCategoryItem | null>(null);
 
   // Base URL for your Ktor backend
-  const API_BASE_URL = "http://localhost:8080"; // Make sure this matches your Ktor server port
+  const API_BASE_URL = "http://localhost:8080";
 
-  // Function to fetch budget items from the backend
+  // Function to fetch all budget categories from the backend
   const fetchBudgetItems = async () => {
     setErrorMessage(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/budget/get`);
+      // Call the new endpoint
+      const response = await fetch(`${API_BASE_URL}/budget/getAllCategories`);
       if (response.ok) {
-        const data = await response.json(); // Backend returns JSON object
+        const data: BudgetCategoryItem[] = await response.json();
         setBudgetItems(data);
+        // If a category was previously selected, try to re-select its updated details
+        if (selectedCategoryDetails) {
+          const updatedDetails = data.find(
+            (item) => item.category === selectedCategoryDetails.category
+          );
+          setSelectedCategoryDetails(updatedDetails || null);
+        }
       } else {
         const errorText = await response.text();
         setErrorMessage(`Failed to fetch budget items: ${errorText}`);
@@ -28,159 +60,342 @@ function App() {
     }
   };
 
-  // Fetch budget items on component mount
+  // Fetch budget items on component mount and whenever a save/spend operation completes
   useEffect(() => {
     fetchBudgetItems();
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
-  const handleSaveBudgetItem = async () => {
+  // Handler for adding a new budget category
+  const handleAddCategory = async () => {
     setErrorMessage(null);
-    if (!categoryName || !initialValue) {
-      setErrorMessage("Please enter both category name and initial value.");
+    if (!newCategoryName || !newOriginalValue) {
+      setErrorMessage("Please enter both category name and original value.");
+      return;
+    }
+    const originalValueNum = parseFloat(newOriginalValue);
+    if (isNaN(originalValueNum)) {
+      setErrorMessage("Original value must be a number.");
       return;
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/budget/save`, {
+      const response = await fetch(`${API_BASE_URL}/budget/addCategory`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ categoryName, initialValue }),
+        body: JSON.stringify({
+          categoryName: newCategoryName,
+          originalValue: originalValueNum,
+        }),
       });
 
       if (response.ok) {
-        setErrorMessage("Budget item saved successfully!");
-        setCategoryName(""); // Clear input fields
-        setInitialValue("");
-        fetchBudgetItems(); // Re-fetch items to update the list/dropdown
+        setErrorMessage("Budget category saved successfully!");
+        setNewCategoryName("");
+        setNewOriginalValue("");
+        fetchBudgetItems(); // Re-fetch to update the list
       } else {
         const errorText = await response.text();
-        setErrorMessage(`Failed to save budget item: ${errorText}`);
+        setErrorMessage(`Failed to save budget category: ${errorText}`);
       }
     } catch (error) {
-      console.error("Error saving budget item:", error);
+      console.error("Error adding category:", error);
       setErrorMessage("Network error or server unavailable.");
     }
   };
 
+  // Handler for recording spending
+  const handleRecordSpend = async () => {
+    setErrorMessage(null);
+    if (!spendCategory || !amountSpent || !spendDescription) {
+      setErrorMessage(
+        "Please select a category and enter amount spent and description."
+      );
+      return;
+    }
+    const amountSpentNum = parseFloat(amountSpent);
+    if (isNaN(amountSpentNum)) {
+      setErrorMessage("Amount spent must be a number.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/budget/recordSpend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          categoryName: spendCategory,
+          amountSpent: amountSpentNum,
+          description: spendDescription,
+        }),
+      });
+
+      if (response.ok) {
+        setErrorMessage("Spend recorded successfully!");
+        setAmountSpent("");
+        setSpendDescription("");
+        fetchBudgetItems(); // Re-fetch to update the list and totals
+      } else {
+        const errorText = await response.text();
+        setErrorMessage(`Failed to record spend: ${errorText}`);
+      }
+    } catch (error) {
+      console.error("Error recording spend:", error);
+      setErrorMessage("Network error or server unavailable.");
+    }
+  };
+
+  // Handler for dropdown selection change
+  const handleCategorySelectChange = (
+    e: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const selectedCatName = e.target.value;
+    const details =
+      budgetItems.find((item) => item.category === selectedCatName) || null;
+    setSelectedCategoryDetails(details);
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-white to-yellow-300 text-black p-6 font-sans">
-      <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-md p-8">
-        <h1 className="text-3xl font-bold mb-6 text-center text-gray-800">
+    <div className="min-h-screen w-screen bg-gradient-to-br from-blue-950 via-blue-800 to-blue-600 text-white p-4 font-sans">
+      <div className="max-w-3xl mx-auto bg-gray-800 rounded-xl shadow-lg p-8">
+        <h1 className="text-3xl font-bold mb-6 text-center text-blue-300">
           Budget Planner
         </h1>
 
-        {/* Section for adding new budget items */}
-        <div className="mb-8 p-6 border border-gray-200 rounded-lg shadow-sm">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-700">
-            Add New Budget Item
+        {errorMessage && (
+          <p className="text-red-400 bg-red-900 p-3 rounded-md text-center mb-6 border border-red-700">
+            {errorMessage}
+          </p>
+        )}
+
+        {/* Section for adding new budget categories */}
+        <div className="mb-8 p-6 bg-gray-700 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4 text-blue-200">
+            Add/Update Budget Category
           </h2>
           <div className="mb-4">
             <label
-              htmlFor="categoryName"
-              className="block font-medium mb-1 text-gray-700"
+              htmlFor="newCategoryName"
+              className="block font-medium mb-1 text-gray-300"
             >
               Category Name:
             </label>
             <input
               type="text"
-              id="categoryName"
-              value={categoryName}
-              onChange={(e) => setCategoryName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+              id="newCategoryName"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              className="w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="e.g., Groceries, Rent"
             />
           </div>
           <div className="mb-6">
             <label
-              htmlFor="initialValue"
-              className="block font-medium mb-1 text-gray-700"
+              htmlFor="newOriginalValue"
+              className="block font-medium mb-1 text-gray-300"
             >
-              Initial Value:
+              Original Budget Value:
             </label>
             <input
-              type="text" // Keep as text to allow flexible input (e.g., "500", "20%")
-              id="initialValue"
-              value={initialValue}
-              onChange={(e) => setInitialValue(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-500"
-              placeholder="e.g., 500, 200"
+              type="number"
+              id="newOriginalValue"
+              value={newOriginalValue}
+              onChange={(e) => setNewOriginalValue(e.target.value)}
+              className="w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="e.g., 500.00"
             />
           </div>
           <button
-            onClick={handleSaveBudgetItem}
-            className="w-full bg-yellow-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-yellow-600 transition duration-300 shadow-md"
+            onClick={handleAddCategory}
+            className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition duration-300 shadow-md"
           >
-            Save Budget Item
+            Add/Update Category
           </button>
         </div>
 
-        {errorMessage && (
-          <p className="text-red-600 bg-red-100 p-3 rounded-md text-center mb-6 border border-red-200">
-            {errorMessage}
-          </p>
-        )}
+        {/* Section for recording spending */}
+        <div className="mb-8 p-6 bg-gray-700 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4 text-blue-200">
+            Record Spending
+          </h2>
+          <div className="mb-4">
+            <label
+              htmlFor="spendCategory"
+              className="block font-medium mb-1 text-gray-300"
+            >
+              Select Category:
+            </label>
+            <select
+              id="spendCategory"
+              value={spendCategory}
+              onChange={(e) => setSpendCategory(e.target.value)}
+              className="w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Select a category --</option>
+              {budgetItems.map((item) => (
+                <option key={item.category} value={item.category}>
+                  {item.category}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mb-4">
+            <label
+              htmlFor="amountSpent"
+              className="block font-medium mb-1 text-gray-300"
+            >
+              Amount Spent:
+            </label>
+            <input
+              type="number"
+              id="amountSpent"
+              value={amountSpent}
+              onChange={(e) => setAmountSpent(e.target.value)}
+              className="w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="e.g., 25.50"
+            />
+          </div>
+          <div className="mb-6">
+            <label
+              htmlFor="spendDescription"
+              className="block font-medium mb-1 text-gray-300"
+            >
+              Description:
+            </label>
+            <input
+              type="text"
+              id="spendDescription"
+              value={spendDescription}
+              onChange={(e) => setSpendDescription(e.target.value)}
+              className="w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="e.g., Coffee, Groceries"
+            />
+          </div>
+          <button
+            onClick={handleRecordSpend}
+            className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 transition duration-300 shadow-md"
+          >
+            Record Spend
+          </button>
+        </div>
 
-        {/* Section for displaying budget items */}
-        <div className="p-6 border border-gray-200 rounded-lg shadow-sm">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-700">
-            Your Budget Overview
+        {/* Section for Budget Overview and Transaction History */}
+        <div className="p-6 bg-gray-700 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4 text-blue-200">
+            Budget Overview
           </h2>
 
-          {Object.keys(budgetItems).length === 0 ? (
-            <p className="text-gray-600 text-center">
-              No budget items saved yet. Add one above!
+          {budgetItems.length === 0 ? (
+            <p className="text-gray-400 text-center">
+              No budget categories added yet. Add one above!
             </p>
           ) : (
             <>
-              {/* Dropdown for selecting a category */}
+              {/* Dropdown for selecting a category to view details */}
               <div className="mb-4">
                 <label
                   htmlFor="categorySelect"
-                  className="block font-medium mb-1 text-gray-700"
+                  className="block font-medium mb-1 text-gray-300"
                 >
-                  Select Category:
+                  View Details for Category:
                 </label>
                 <select
                   id="categorySelect"
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-500 bg-white"
+                  value={selectedCategoryDetails?.category || ""}
+                  onChange={handleCategorySelectChange}
+                  className="w-full border border-gray-600 rounded-lg px-4 py-2 bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- Select a category --</option>
-                  {Object.keys(budgetItems).map((key) => (
-                    <option key={key} value={key}>
-                      {key}
+                  {budgetItems.map((item) => (
+                    <option key={item.category} value={item.category}>
+                      {item.category}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Display selected category's value */}
-              {selectedCategory && (
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <p className="text-lg font-semibold text-gray-800">
-                    {selectedCategory}:
+              {selectedCategoryDetails && (
+                <div className="mt-4 p-4 bg-gray-900 rounded-lg border border-gray-600">
+                  <h3 className="text-xl font-semibold mb-2 text-blue-300">
+                    {selectedCategoryDetails.category}
+                  </h3>
+                  <p className="text-gray-300">
+                    Original Budget:{" "}
+                    <span className="font-bold text-green-400">
+                      ${selectedCategoryDetails.originalValue.toFixed(2)}
+                    </span>
                   </p>
-                  <p className="text-xl text-green-700 font-bold">
-                    {budgetItems[selectedCategory]}
+                  <p className="text-gray-300">
+                    Spent So Far:{" "}
+                    <span className="font-bold text-red-400">
+                      ${selectedCategoryDetails.spentAmountSoFar.toFixed(2)}
+                    </span>
                   </p>
+                  <p className="text-gray-300">
+                    Remaining:{" "}
+                    <span className="font-bold text-yellow-400">
+                      $
+                      {(
+                        selectedCategoryDetails.originalValue -
+                        selectedCategoryDetails.spentAmountSoFar
+                      ).toFixed(2)}
+                    </span>
+                  </p>
+
+                  <h4 className="text-lg font-semibold mt-4 mb-2 text-blue-300">
+                    Transaction History:
+                  </h4>
+                  {Object.keys(selectedCategoryDetails.transactionHistory)
+                    .length === 0 ? (
+                    <p className="text-gray-400">
+                      No transactions recorded for this category yet.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-gray-600">
+                      {Object.entries(
+                        selectedCategoryDetails.transactionHistory
+                      )
+                        .sort(([dateA], [dateB]) => dateB.localeCompare(dateA)) // Sort by date, newest first
+                        .map(([date, transaction], index) => (
+                          <li key={date + index} className="py-2 text-gray-300">
+                            <span className="font-bold text-gray-200">
+                              {date}:
+                            </span>{" "}
+                            ${transaction.amount.toFixed(2)} -{" "}
+                            {transaction.description}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
                 </div>
               )}
 
-              {/* List of all budget items (optional, but good for overview) */}
-              <h3 className="text-lg font-semibold mt-6 mb-2 text-gray-700">
-                All Budget Items:
+              <h3 className="text-lg font-semibold mt-6 mb-2 text-blue-300">
+                All Categories Summary:
               </h3>
-              <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200">
-                {Object.entries(budgetItems).map(([key, value]) => (
+              <ul className="divide-y divide-gray-600 rounded-lg border border-gray-600">
+                {budgetItems.map((item) => (
                   <li
-                    key={key}
-                    className="flex justify-between items-center p-3 hover:bg-gray-50"
+                    key={item.category}
+                    className="flex justify-between items-center p-3 hover:bg-gray-900"
                   >
-                    <span className="font-medium text-gray-800">{key}:</span>
-                    <span className="text-gray-700">{value}</span>
+                    <span className="font-medium text-gray-200">
+                      {item.category}:
+                    </span>
+                    <span className="text-gray-300">
+                      ${item.spentAmountSoFar.toFixed(2)} / $
+                      {item.originalValue.toFixed(2)} (Remaining:{" "}
+                      <span className="text-yellow-400">
+                        $
+                        {(item.originalValue - item.spentAmountSoFar).toFixed(
+                          2
+                        )}
+                      </span>
+                      )
+                    </span>
                   </li>
                 ))}
               </ul>

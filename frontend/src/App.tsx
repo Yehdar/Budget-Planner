@@ -6,12 +6,11 @@ interface TransactionEntry {
   description: string;
 }
 
-// Updated: Define the structure of a budget category item as received from the backend
+// Define the structure of a budget category item as received from the backend
 interface BudgetCategoryItem {
   category: string;
   originalValue: number;
   spentAmountSoFar: number;
-  // Changed: transactionHistory now maps a date string to a LIST of TransactionEntry
   transactionHistory: { [date: string]: TransactionEntry[] };
 }
 
@@ -145,6 +144,44 @@ function App() {
       }
     } catch (error) {
       console.error("Error recording spend:", error);
+      setErrorMessage("Network error or server unavailable.");
+    }
+  };
+
+  // Handler for deleting a budget category
+  const handleDeleteCategory = async (categoryToDelete: string) => {
+    setErrorMessage(null);
+    if (
+      !window.confirm(
+        `Are you sure you want to delete the category "${categoryToDelete}"?`
+      )
+    ) {
+      return; // User cancelled the deletion
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/budget/deleteCategory/${categoryToDelete}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (response.ok) {
+        setErrorMessage(`Category "${categoryToDelete}" deleted successfully!`);
+        fetchBudgetItems(); // Re-fetch to update the list
+        // If the deleted category was the one currently selected, clear the details view
+        if (selectedCategoryDetails?.category === categoryToDelete) {
+          setSelectedCategoryDetails(null);
+        }
+      } else {
+        const errorText = await response.text();
+        setErrorMessage(
+          `Failed to delete category "${categoryToDelete}": ${errorText}`
+        );
+      }
+    } catch (error) {
+      console.error("Error deleting category:", error);
       setErrorMessage("Network error or server unavailable.");
     }
   };
@@ -356,7 +393,6 @@ function App() {
                     </p>
                   ) : (
                     <ul className="divide-y divide-gray-600">
-                      {/* Iterate over dates, then over transactions for each date */}
                       {Object.entries(
                         selectedCategoryDetails.transactionHistory
                       )
@@ -407,6 +443,12 @@ function App() {
                       </span>
                       )
                     </span>
+                    <button
+                      onClick={() => handleDeleteCategory(item.category)}
+                      className="ml-4 px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 transition duration-200 text-sm"
+                    >
+                      Delete
+                    </button>
                   </li>
                 ))}
               </ul>

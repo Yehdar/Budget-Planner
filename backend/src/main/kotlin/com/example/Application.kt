@@ -24,9 +24,10 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.time.LocalDate // Import for LocalDate
-import kotlinx.serialization.builtins.ListSerializer // Import for ListSerializer
-import kotlinx.serialization.builtins.MapSerializer // Import for MapSerializer
+import java.time.LocalDate
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq // ADD THIS IMPORT
 
 // Data class for adding a new budget category
 @Serializable
@@ -56,7 +57,6 @@ data class BudgetCategoryItem(
     val category: String,
     val originalValue: Double,
     val spentAmountSoFar: Double,
-    // Changed transactionHistory to map date string to a LIST of TransactionEntry
     val transactionHistory: Map<String, List<TransactionEntry>>
 )
 
@@ -67,6 +67,7 @@ fun main() {
             allowHeader(HttpHeaders.ContentType)
             allowMethod(HttpMethod.Get)
             allowMethod(HttpMethod.Post)
+            allowMethod(HttpMethod.Delete) // Allow DELETE method for category deletion
         }
 
         install(ContentNegotiation) {
@@ -87,7 +88,7 @@ fun main() {
             val defaultUser = Users.select { Users.id eq 1 }.singleOrNull()
             if (defaultUser == null) {
                 Users.insert {
-                    it[id] = 1 // Explicitly set ID to 1 for the default user
+                    it[id] = 1
                     it[username] = "default_user"
                     it[password] = "default_password"
                 }
@@ -101,7 +102,7 @@ fun main() {
                     val request = call.receive<AddBudgetCategoryRequest>()
                     val categoryName = request.categoryName
                     val originalValue = request.originalValue
-                    val defaultUserId = 1 // Assuming default user
+                    val defaultUserId = 1
 
                     val result = transaction {
                         val existingCategory = Budgets.select {
@@ -109,21 +110,19 @@ fun main() {
                         }.singleOrNull()
 
                         if (existingCategory != null) {
-                            // Update existing category's original value
                             Budgets.update({ (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName) }) {
                                 it[Budgets.originalValue] = originalValue
                             }
-                            "updated" // Return a string to indicate update
+                            "updated"
                         } else {
-                            // Add new category
                             Budgets.insert {
                                 it[Budgets.userId] = defaultUserId
                                 it[Budgets.category] = categoryName
                                 it[Budgets.originalValue] = originalValue
-                                it[Budgets.spentAmountSoFar] = 0.0 // New category starts with 0 spent
-                                it[Budgets.transactionHistory] = "{}" // New category starts with empty JSON object for history
+                                it[Budgets.spentAmountSoFar] = 0.0
+                                it[Budgets.transactionHistory] = "{}"
                             }
-                            "created" // Return a string to indicate creation
+                            "created"
                         }
                     }
 
@@ -145,22 +144,20 @@ fun main() {
                     val categoryName = request.categoryName
                     val amountSpent = request.amountSpent
                     val description = request.description
-                    val defaultUserId = 1 // Assuming default user
+                    val defaultUserId = 1
 
-                    // Perform database operations in transaction and return a result
                     val transactionResult: String = transaction {
                         val existingCategory = Budgets.select {
                             (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName)
                         }.singleOrNull()
 
                         if (existingCategory == null) {
-                            return@transaction "notFound" // Indicate category not found
+                            return@transaction "notFound"
                         }
 
                         val currentSpent = existingCategory[Budgets.spentAmountSoFar]
                         val newSpent = currentSpent + amountSpent
 
-                        // Decode existing transaction history into a map of date to LIST of transactions
                         val currentHistoryJsonString = existingCategory[Budgets.transactionHistory]
                         val currentHistory: MutableMap<String, MutableList<TransactionEntry>> =
                             if (currentHistoryJsonString.isNotEmpty() && currentHistoryJsonString != "{}") {
@@ -169,26 +166,20 @@ fun main() {
                                 mutableMapOf()
                             }
 
-                        // Get current date for transaction history key
-                        val currentDate = LocalDate.now().toString() // Format: YYYY-MM-DD
+                        val currentDate = LocalDate.now().toString()
 
-                        // Get the list of transactions for the current date, or create a new list if none exists
                         val transactionsForDate = currentHistory.getOrPut(currentDate) { mutableListOf() }
-                        // Add the new transaction to the list
                         transactionsForDate.add(TransactionEntry(amountSpent, description))
 
-                        // Encode updated history back to JSON string
                         val updatedHistoryJsonString = Json.encodeToString(currentHistory)
 
-                        // Update the budget category record
                         Budgets.update({ (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName) }) {
                             it[Budgets.spentAmountSoFar] = newSpent
                             it[Budgets.transactionHistory] = updatedHistoryJsonString
                         }
-                        "success:$newSpent" // Indicate success and new spent amount
+                        "success:$newSpent"
                     }
 
-                    // Handle the result of the transaction outside the transaction block
                     when {
                         transactionResult == "notFound" -> call.respond(HttpStatusCode.NotFound, "Budget category '$categoryName' not found for user.")
                         transactionResult.startsWith("success:") -> {
@@ -203,16 +194,38 @@ fun main() {
                 }
             }
 
+            // Endpoint to delete a budget category
+            delete("/budget/deleteCategory/{categoryName}") {
+                try {
+                    val categoryName = call.parameters["categoryName"] ?: throw IllegalArgumentException("Category name missing")
+                    val defaultUserId = 1
+
+                    // The 'eq' operator needs to be explicitly imported from SqlExpressionBuilder
+                    val deletedRows = transaction {
+                        Budgets.deleteWhere { (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName) }
+                    }
+
+                    if (deletedRows > 0) {
+                        call.respond(HttpStatusCode.OK, "Budget category '$categoryName' deleted successfully.")
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "Budget category '$categoryName' not found for user.")
+                    }
+                } catch (e: IllegalArgumentException) {
+                    call.respond(HttpStatusCode.BadRequest, e.localizedMessage)
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, "Failed to delete budget category: ${e.localizedMessage}")
+                }
+            }
+
             // Endpoint to get all budget categories for the default user
             get("/budget/getAllCategories") {
                 try {
-                    val defaultUserId = 1 // Assuming default user
+                    val defaultUserId = 1
 
                     val categories = transaction {
                         Budgets.select { Budgets.userId eq defaultUserId }
                             .map { row ->
                                 val historyJsonString = row[Budgets.transactionHistory]
-                                // Decode transaction history into a map of date to LIST of transactions
                                 val historyMap: Map<String, List<TransactionEntry>> =
                                     if (historyJsonString.isNotEmpty() && historyJsonString != "{}") {
                                         Json.decodeFromString(historyJsonString)
@@ -238,14 +251,13 @@ fun main() {
             get("/budget/getCategoryDetails/{categoryName}") {
                 try {
                     val categoryName = call.parameters["categoryName"] ?: throw IllegalArgumentException("Category name missing")
-                    val defaultUserId = 1 // Assuming default user
+                    val defaultUserId = 1
 
                     val categoryDetails = transaction {
                         Budgets.select {
                             (Budgets.userId eq defaultUserId) and (Budgets.category eq categoryName)
                         }.singleOrNull()?.let { row ->
                             val historyJsonString = row[Budgets.transactionHistory]
-                            // Decode transaction history into a map of date to LIST of transactions
                             val historyMap: Map<String, List<TransactionEntry>> =
                                 if (historyJsonString.isNotEmpty() && historyJsonString != "{}") {
                                     Json.decodeFromString(historyJsonString)

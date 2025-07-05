@@ -14,6 +14,30 @@ interface BudgetCategoryItem {
   transactionHistory: { [date: string]: TransactionEntry[] };
 }
 
+// --- Error Modal Component ---
+interface ErrorModalProps {
+  message: string;
+  onClose: () => void;
+}
+
+const ErrorModal: React.FC<ErrorModalProps> = ({ message, onClose }) => {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center z-50 p-4">
+      <div className="bg-gradient-to-br from-red-900 to-red-950 text-white rounded-xl shadow-2xl p-8 max-w-sm w-full text-center transform transition-all duration-300 scale-100 animate-fade-in">
+        <h3 className="text-2xl font-bold mb-4 text-red-200">Oopsie! 🙊</h3>
+        <p className="mb-6 text-red-100">{message}</p>
+        <button
+          onClick={onClose}
+          className="bg-red-400 text-red-900 font-bold py-2 px-6 rounded-lg hover:bg-red-300 transition duration-300 shadow-lg transform hover:scale-105"
+        >
+          Got It!
+        </button>
+      </div>
+    </div>
+  );
+};
+// --- End Error Modal Component ---
+
 function App() {
   // State for adding new categories
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -26,6 +50,7 @@ function App() {
 
   // State for fetched budget data
   const [budgetItems, setBudgetItems] = useState<BudgetCategoryItem[]>([]);
+  // Changed errorMessage to control modal visibility
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // State for selected category in the overview dropdown
@@ -37,7 +62,7 @@ function App() {
 
   // Function to fetch all budget categories from the backend
   const fetchBudgetItems = async () => {
-    setErrorMessage(null);
+    setErrorMessage(null); // Clear error before fetch
     try {
       const response = await fetch(`${API_BASE_URL}/budget/getAllCategories`);
       if (response.ok) {
@@ -52,11 +77,15 @@ function App() {
         }
       } else {
         const errorText = await response.text();
-        setErrorMessage(`Failed to fetch budget items: ${errorText}`);
+        setErrorMessage(
+          `Failed to fetch budget items: ${errorText}. Please ensure the backend is running and the database is set up correctly!`
+        );
       }
     } catch (error) {
       console.error("Error fetching budget items:", error);
-      setErrorMessage("Network error or server unavailable.");
+      setErrorMessage(
+        "Network error or server unavailable. Check your internet connection or backend server status."
+      );
     }
   };
 
@@ -68,13 +97,19 @@ function App() {
   // Handler for adding a new budget category
   const handleAddCategory = async () => {
     setErrorMessage(null);
-    if (!newCategoryName || !newOriginalValue) {
-      setErrorMessage("Please enter both category name and original value.");
+    if (!newCategoryName.trim() || !newOriginalValue.trim()) {
+      // Use trim() to check for empty strings
+      setErrorMessage(
+        "Category Name and Original Value cannot be empty. Please fill them both in!"
+      );
       return;
     }
     const originalValueNum = parseFloat(newOriginalValue);
-    if (isNaN(originalValueNum)) {
-      setErrorMessage("Original value must be a number.");
+    if (isNaN(originalValueNum) || originalValueNum < 0) {
+      // Ensure positive number
+      setErrorMessage(
+        "Original Value must be a positive number. For example, '500.00'."
+      );
       return;
     }
 
@@ -85,38 +120,45 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          categoryName: newCategoryName,
+          categoryName: newCategoryName.trim(),
           originalValue: originalValueNum,
         }),
       });
 
       if (response.ok) {
-        setErrorMessage("Budget category saved successfully!");
+        setErrorMessage("Budget category saved successfully! 🎉");
         setNewCategoryName("");
         setNewOriginalValue("");
         fetchBudgetItems(); // Re-fetch to update the list
       } else {
         const errorText = await response.text();
-        setErrorMessage(`Failed to save budget category: ${errorText}`);
+        setErrorMessage(
+          `Failed to save budget category: ${errorText}. Maybe this category already exists?`
+        );
       }
     } catch (error) {
       console.error("Error adding category:", error);
-      setErrorMessage("Network error or server unavailable.");
+      setErrorMessage(
+        "Network error or server unavailable. Please try again later!"
+      );
     }
   };
 
   // Handler for recording spending
   const handleRecordSpend = async () => {
     setErrorMessage(null);
-    if (!spendCategory || !amountSpent || !spendDescription) {
+    if (!spendCategory || !amountSpent.trim() || !spendDescription.trim()) {
       setErrorMessage(
-        "Please select a category and enter amount spent and description."
+        "Please select a category, enter a valid amount spent, and provide a description."
       );
       return;
     }
     const amountSpentNum = parseFloat(amountSpent);
-    if (isNaN(amountSpentNum)) {
-      setErrorMessage("Amount spent must be a number.");
+    if (isNaN(amountSpentNum) || amountSpentNum <= 0) {
+      // Ensure positive amount
+      setErrorMessage(
+        "Amount Spent must be a positive number. For example, '25.50'."
+      );
       return;
     }
 
@@ -129,34 +171,39 @@ function App() {
         body: JSON.stringify({
           categoryName: spendCategory,
           amountSpent: amountSpentNum,
-          description: spendDescription,
+          description: spendDescription.trim(),
         }),
       });
 
       if (response.ok) {
-        setErrorMessage("Spend recorded successfully!");
+        setErrorMessage("Spend recorded successfully! 💰");
         setAmountSpent("");
         setSpendDescription("");
         fetchBudgetItems(); // Re-fetch to update the list and totals
       } else {
         const errorText = await response.text();
-        setErrorMessage(`Failed to record spend: ${errorText}`);
+        setErrorMessage(
+          `Failed to record spend: ${errorText}. Is the category selected correctly?`
+        );
       }
     } catch (error) {
       console.error("Error recording spend:", error);
-      setErrorMessage("Network error or server unavailable.");
+      setErrorMessage(
+        "Network error or server unavailable. Please check your connection!"
+      );
     }
   };
 
   // Handler for deleting a budget category
   const handleDeleteCategory = async (categoryToDelete: string) => {
     setErrorMessage(null);
-    if (
-      !window.confirm(
-        `Are you sure you want to delete the category "${categoryToDelete}"?`
-      )
-    ) {
-      return; // User cancelled the deletion
+    // Using a custom modal instead of window.confirm for consistency
+    const confirmDelete = window.confirm(
+      `Are you sure you want to permanently delete the category "${categoryToDelete}" and all its transactions? This cannot be undone!`
+    );
+    if (!confirmDelete) {
+      setErrorMessage("Deletion cancelled. Your budget category is safe!");
+      return;
     }
 
     try {
@@ -168,7 +215,9 @@ function App() {
       );
 
       if (response.ok) {
-        setErrorMessage(`Category "${categoryToDelete}" deleted successfully!`);
+        setErrorMessage(
+          `Category "${categoryToDelete}" deleted successfully! 👋`
+        );
         fetchBudgetItems(); // Re-fetch to update the list
         // If the deleted category was the one currently selected, clear the details view
         if (selectedCategoryDetails?.category === categoryToDelete) {
@@ -177,12 +226,14 @@ function App() {
       } else {
         const errorText = await response.text();
         setErrorMessage(
-          `Failed to delete category "${categoryToDelete}": ${errorText}`
+          `Failed to delete category "${categoryToDelete}": ${errorText}. Maybe it's already gone?`
         );
       }
     } catch (error) {
       console.error("Error deleting category:", error);
-      setErrorMessage("Network error or server unavailable.");
+      setErrorMessage(
+        "Network error or server unavailable. Try deleting again!"
+      );
     }
   };
 
@@ -203,10 +254,12 @@ function App() {
           Budget Planner
         </h1>
 
+        {/* Error Modal Display */}
         {errorMessage && (
-          <p className="text-red-400 bg-red-900 p-3 rounded-md text-center mb-6 border border-red-700">
-            {errorMessage}
-          </p>
+          <ErrorModal
+            message={errorMessage}
+            onClose={() => setErrorMessage(null)}
+          />
         )}
 
         {/* Section for adding new budget categories */}
@@ -250,7 +303,7 @@ function App() {
             onClick={handleAddCategory}
             className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition duration-300 shadow-md"
           >
-            Add/Update Category
+            Add/Update Category 🫡
           </button>
         </div>
 
@@ -316,7 +369,7 @@ function App() {
             onClick={handleRecordSpend}
             className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 transition duration-300 shadow-md"
           >
-            Record Spend
+            Record Spend 💸
           </button>
         </div>
 

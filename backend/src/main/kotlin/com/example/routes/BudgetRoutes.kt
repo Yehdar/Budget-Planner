@@ -1,67 +1,86 @@
-// package com.example.routes
+package com.example.routes
 
-// import io.ktor.server.application.*
-// import io.ktor.server.request.*
-// import io.ktor.server.response.*
-// import io.ktor.server.routing.*
-// import kotlinx.serialization.Serializable
-// import org.jetbrains.exposed.sql.*
-// import org.jetbrains.exposed.sql.transactions.transaction
-// import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import com.example.model.*
 
+import com.example.service.BudgetService
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
 
-// object Budgets : Table() {
-//     val id = integer("id").autoIncrement()
-//     val title = varchar("title", 255)
-//     val amount = double("amount")
-//     override val primaryKey = PrimaryKey(id)
-// }
+fun Application.configureBudgetRoutes(budgetService: BudgetService) {
+    routing {
+        post("/budget/addCategory") {
+            try {
+                val request = call.receive<AddBudgetCategoryRequest>()
+                val result = budgetService.addOrUpdateCategory(request)
+                when (result) {
+                    "updated" -> call.respond(HttpStatusCode.OK, "Budget category '${request.categoryName}' updated successfully.")
+                    "created" -> call.respond(HttpStatusCode.Created, "Budget category '${request.categoryName}' added successfully.")
+                    else -> call.respond(HttpStatusCode.InternalServerError, "Unexpected error during category operation.")
+                }
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, "Failed to add/update budget category: ${e.localizedMessage}")
+            }
+        }
 
-// @Serializable
-// data class Budget(val id: Int = 0, val title: String, val amount: Double)
+        post("/budget/recordSpend") {
+            try {
+                val request = call.receive<RecordSpendRequest>()
+                val transactionResult = budgetService.recordSpend(request)
+                when {
+                    transactionResult == "notFound" -> call.respond(HttpStatusCode.NotFound, "Budget category '${request.categoryName}' not found for user.")
+                    transactionResult.startsWith("success:") -> {
+                        val newSpent = transactionResult.split(":")[1]
+                        call.respond(HttpStatusCode.OK, "Spend recorded for '${request.categoryName}'. New spent total: $newSpent")
+                    }
+                    else -> call.respond(HttpStatusCode.InternalServerError, "An unexpected error occurred.")
+                }
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, "Failed to record spending: ${e.localizedMessage}")
+            }
+        }
 
-// fun Application.registerBudgetRoutes() {
-//     transaction {
-//         SchemaUtils.create(Budgets)
-//     }
+        delete("/budget/deleteCategory/{categoryName}") {
+            try {
+                val categoryName = call.parameters["categoryName"] ?: throw IllegalArgumentException("Category name missing")
+                val deletedRows = budgetService.deleteCategory(categoryName)
+                if (deletedRows > 0) {
+                    call.respond(HttpStatusCode.OK, "Budget category '$categoryName' deleted successfully.")
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Budget category '$categoryName' not found for user.")
+                }
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, e.localizedMessage)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Failed to delete budget category: ${e.localizedMessage}")
+            }
+        }
 
-//     routing {
-//         route("/api/budgets") {
-//             get {
-//                 val budgets = transaction {
-//                     Budgets.selectAll().map {
-//                         Budget(
-//                             id = it[Budgets.id],
-//                             title = it[Budgets.title],
-//                             amount = it[Budgets.amount]
-//                         )
-//                     }
-//                 }
-//                 call.respond(budgets)
-//             }
+        get("/budget/getAllCategories") {
+            try {
+                val categories = budgetService.getAllCategories()
+                call.respond(HttpStatusCode.OK, categories)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Failed to retrieve budget categories: ${e.localizedMessage}")
+            }
+        }
 
-//             post {
-//                 val budget = call.receive<Budget>()
-//                 transaction {
-//                     Budgets.insert {
-//                         it[title] = budget.title
-//                         it[amount] = budget.amount
-//                     }
-//                 }
-//                 call.respondText("Budget item added successfully.")
-//             }
-
-//             delete("{id}") {
-//                 val id = call.parameters["id"]?.toIntOrNull()
-//                 if (id != null) {
-//                     transaction {
-//                         Budgets.deleteWhere { Budgets.id eq id }
-//                     }
-//                     call.respondText("Budget item deleted.")
-//                 } else {
-//                     call.respondText("Invalid ID.")
-//                 }
-//             }
-//         }
-//     }
-// }
+        get("/budget/getCategoryDetails/{categoryName}") {
+            try {
+                val categoryName = call.parameters["categoryName"] ?: throw IllegalArgumentException("Category name missing")
+                val categoryDetails = budgetService.getCategoryDetails(categoryName)
+                if (categoryDetails != null) {
+                    call.respond(HttpStatusCode.OK, categoryDetails)
+                } else {
+                    call.respond(HttpStatusCode.NotFound, "Category '$categoryName' not found for user.")
+                }
+            } catch (e: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, e.localizedMessage)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, "Failed to retrieve category details: ${e.localizedMessage}")
+            }
+        }
+    }
+}

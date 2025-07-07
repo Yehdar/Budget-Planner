@@ -1,12 +1,16 @@
 # Budget Planner
 
+## Presentation
+
+[Canva Slideshow](https://www.canva.com/design/DAGsTAMaers/ThfchRtBUotsxPknQczy9w/edit)
+
 ## Abstract
 
 An application designed to help users manage their finances by
 defining their budget allocations, tracking their spending
 habits, and monitoring their financial health.
 
-<p align="center"><img src="https://github.com/Yehdar/budget-planner/blob/main/demo/demo.png" width="80%"></p>
+<p align="center"><img src="https://github.com/Yehdar/budget-planner/blob/main/demo/demo.png" width="60%"></p>
 
 ### Technologies Used
 
